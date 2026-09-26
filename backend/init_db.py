@@ -144,7 +144,7 @@ users = [
         "manager@company.com",
         "Manager@123",
         "manager",
-        None,
+        "IT Support",
     ),
     (
         "U-1004",

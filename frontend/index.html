@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Service Desk</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="auth-screen">
+  <div class="auth-card">
+    <div class="mark">SD</div>
+    <h1>Employee Service Desk</h1>
+    <div class="sub">Sign in to raise, track, or manage service requests.</div>
+    <div id="alertBox"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label for="email">Work email</label>
+        <input type="email" id="email" required autocomplete="username" placeholder="you@company.com">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" required autocomplete="current-password" placeholder="••••••••">
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%" id="loginBtn">Sign in</button>
+    </form>
+    <details class="demo-accounts">
+      <summary>Demo accounts</summary>
+      <table>
+        <tr><td class="role">Employee</td><td>employee@company.com</td><td>Employee@123</td></tr>
+        <tr><td class="role">Executive</td><td>executive@company.com</td><td>Executive@123</td></tr>
+        <tr><td class="role">Manager</td><td>manager@company.com</td><td>Manager@123</td></tr>
+        <tr><td class="role">Admin</td><td>admin@company.com</td><td>Admin@123</td></tr>
+      </table>
+    </details>
+  </div>
+</div>
+<script src="services/api.js"></script>
+<script src="js/ui.js"></script>
+<script>
+  if (new URLSearchParams(location.search).get("expired")) {
+    document.getElementById("alertBox").innerHTML = '<div class="alert alert-warn">Your session expired. Please sign in again.</div>';
+  }
+  // Already logged in? Skip straight to the right dashboard.
+  (function () {
+    const user = Session.getCurrentUser();
+    if (user && Session.getToken()) location.href = homeForRole(user.role);
+  })();
+
+  document.getElementById("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const alertBox = document.getElementById("alertBox");
+    const btn = document.getElementById("loginBtn");
+    clearAlert(alertBox);
+    btn.disabled = true; btn.textContent = "Signing in…";
+    try {
+      const { token, user } = await Api.login(document.getElementById("email").value.trim(), document.getElementById("password").value);
+      Session.setSession(token, user);
+      location.href = homeForRole(user.role);
+    } catch (err) {
+      showAlert(alertBox, err.message);
+      btn.disabled = false; btn.textContent = "Sign in";
+    }
+  });
+</script>
+</body>
+</html>

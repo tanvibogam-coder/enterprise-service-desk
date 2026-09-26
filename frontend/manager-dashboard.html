@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manager Dashboard · Service Desk</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <h1>Manager Dashboard</h1>
+      <div class="topbar-right">
+        <button class="icon-btn" id="notifBell">🔔<span class="badge-count" id="notifCount" style="display:none"></span></button>
+      </div>
+    </div>
+    <div class="content">
+      <div id="alertBox"></div>
+      <div class="kpi-grid" id="kpiGrid"></div>
+
+      <div class="chart-grid">
+        <div class="panel">
+          <div class="panel-header"><h2>Requests by status</h2></div>
+          <div class="panel-body" id="chartStatus"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2>Requests by priority</h2></div>
+          <div class="panel-body" id="chartPriority"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2>Requests by category</h2></div>
+          <div class="panel-body" id="chartCategory"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><h2>Executive workload (open requests)</h2></div>
+          <div class="panel-body" id="chartWorkload"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="services/api.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(async function () {
+  const user = guardPage(["manager", "admin"]);
+  if (!user) return;
+  await renderShell(user.role === "admin" ? "manager-dashboard.html" : "manager-dashboard.html");
+
+  const alertBox = document.getElementById("alertBox");
+  try {
+    const data = user.role === "admin" ? await Api.adminDashboard() : await Api.managerDashboard();
+    const k = data.kpis;
+    document.getElementById("kpiGrid").innerHTML = `
+      <div class="kpi-card"><div class="kpi-label">Total requests</div><div class="kpi-value">${k.totalRequests}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Open requests</div><div class="kpi-value accent-brand">${k.openRequests}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Critical open</div><div class="kpi-value accent-critical">${k.criticalRequests}</div></div>
+      <div class="kpi-card"><div class="kpi-label">SLA breaches</div><div class="kpi-value accent-critical">${k.slaBreaches}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Avg. resolution (hrs)</div><div class="kpi-value">${k.avgResolutionHours}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Pending / awaiting info</div><div class="kpi-value">${k.pendingRequests}</div></div>
+    `;
+
+    renderBars("chartStatus", data.charts.byStatus);
+    renderBars("chartPriority", data.charts.byPriority);
+    renderBars("chartCategory", data.charts.byCategory);
+
+    const wEl = document.getElementById("chartWorkload");
+    wEl.innerHTML = data.workload.length
+      ? "" 
+      : `<div class="hint">No requests assigned yet.</div>`;
+    if (data.workload.length) {
+      const max = Math.max(...data.workload.map((w) => w.openCount), 1);
+      wEl.innerHTML = data.workload
+        .sort((a, b) => b.openCount - a.openCount)
+        .map(
+          (w) => `<div class="bar-row">
+            <div class="label">${escapeHtml(w.name)}</div>
+            <div class="track"><div class="fill" style="width:${(w.openCount / max) * 100}%"></div></div>
+            <div class="val">${w.openCount}</div>
+          </div>`
+        )
+        .join("");
+    }
+  } catch (err) {
+    showAlert(alertBox, err.message);
+  }
+
+  function renderBars(elId, obj) {
+    const el = document.getElementById(elId);
+    const entries = Object.entries(obj || {});
+    if (!entries.length) { el.innerHTML = `<div class="hint">No data yet.</div>`; return; }
+    const max = Math.max(...entries.map(([, v]) => v), 1);
+    el.innerHTML = entries
+      .sort((a, b) => b[1] - a[1])
+      .map(
+        ([label, val]) => `<div class="bar-row">
+          <div class="label">${escapeHtml(label)}</div>
+          <div class="track"><div class="fill" style="width:${(val / max) * 100}%"></div></div>
+          <div class="val">${val}</div>
+        </div>`
+      )
+      .join("");
+  }
+})();
+</script>
+</body>
+</html>

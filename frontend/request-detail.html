@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Request · Service Desk</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <h1 id="pageTitle">Request</h1>
+      <div class="topbar-right">
+        <button class="icon-btn" id="notifBell">🔔<span class="badge-count" id="notifCount" style="display:none"></span></button>
+      </div>
+    </div>
+    <div class="content" id="content">
+      <div class="loading-row">Loading…</div>
+    </div>
+  </div>
+</div>
+<script src="services/api.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(async function () {
+  const user = guardPage(["employee", "executive", "manager", "admin"]);
+  if (!user) return;
+  await renderShell(user.role === "employee" ? "requests-list.html" : "requests-list.html");
+
+  const id = new URLSearchParams(location.search).get("id");
+  const content = document.getElementById("content");
+  if (!id) { content.innerHTML = `<div class="alert alert-error">No request specified.</div>`; return; }
+
+  let usersCache = [];
+  async function ensureUsers() {
+    if (usersCache.length) return usersCache;
+    try { usersCache = await Api.users(); } catch (e) { usersCache = []; }
+    return usersCache;
+  }
+
+  async function load() {
+    let r;
+    try {
+      r = await Api.getRequest(id);
+    } catch (err) {
+      content.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+      return;
+    }
+    document.getElementById("pageTitle").textContent = r.id;
+
+    const canManage = ["executive", "manager", "admin"].includes(user.role);
+    const canAssign = ["manager", "admin"].includes(user.role);
+    const isOwner = user.role === "employee" && r.employeeId === user.id;
+
+    const nextStatusOptions = statusOptionsFor(r.status);
+
+    content.innerHTML = `
+      <div class="detail-grid">
+        <div>
+          <div class="panel" style="margin-bottom:16px">
+            <div class="panel-header">
+              <h2>${escapeHtml(r.title)}</h2>
+              <span class="tag-row">${statusBadge(r.status)}${priorityBadge(r.priority)}${slaBadge(r.sla)}</span>
+            </div>
+            <div class="panel-body">
+              <p style="color:var(--ink-soft)">${escapeHtml(r.description)}</p>
+              ${r.attachment ? `<div class="hint">📎 ${escapeHtml(r.attachment)} ${r.attachments && r.attachments.length ? `<button class="btn btn-sm" type="button" id="downloadAttachmentBtn">Download</button>` : ""}</div>` : ""}
+            </div>
+          </div>
+
+          <div class="panel" style="margin-bottom:16px">
+            <div class="panel-header"><h2>Activity timeline</h2></div>
+            <div class="panel-body">
+              <ul class="timeline">
+                ${r.history
+                  .map(
+                    (h) => `<li>
+                      <div class="t-status">${escapeHtml(h.status)}</div>
+                      <div class="t-meta">${fmtDate(h.at)} · ${escapeHtml(userLabel(h.by))}</div>
+                      ${h.note ? `<div class="t-note">${escapeHtml(h.note)}</div>` : ""}
+                    </li>`
+                  )
+                  .join("")}
+              </ul>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><h2>Comments</h2></div>
+            <div class="panel-body">
+              <div id="commentsWrap">
+                ${
+                  r.comments.length
+                    ? r.comments
+                        .map(
+                          (c) => `<div class="comment ${c.internal ? "internal" : ""}">
+                            <div class="comment-head">
+                              <span class="who">${escapeHtml(c.byName)}</span>
+                              <span>·</span><span style="text-transform:capitalize">${escapeHtml(c.role)}</span>
+                              ${c.internal ? '<span class="comment-tag">Internal</span>' : ""}
+                              <span class="when">${fmtDate(c.createdAt)}</span>
+                            </div>
+                            <div>${escapeHtml(c.text)}</div>
+                          </div>`
+                        )
+                        .join("")
+                    : `<div class="hint">No comments yet.</div>`
+                }
+              </div>
+              <form id="commentForm" style="margin-top:14px">
+                <div class="field">
+                  <textarea id="commentText" placeholder="Add a comment…" required></textarea>
+                </div>
+                <div class="form-actions" style="align-items:center">
+                  <button class="btn btn-primary btn-sm" type="submit">Post comment</button>
+                  ${canManage ? `<label style="font-size:12.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px"><input type="checkbox" id="internalCheck"> Internal note (staff only)</label>` : ""}
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="panel" style="margin-bottom:16px">
+            <div class="panel-header"><h2>Details</h2></div>
+            <div class="panel-body meta-list">
+              <div class="row"><span class="k">Request ID</span><span class="v req-id">${r.id}</span></div>
+              <div class="row"><span class="k">Employee</span><span class="v">${escapeHtml(userLabel(r.employeeId))}</span></div>
+              <div class="row"><span class="k">Category</span><span class="v">${escapeHtml(r.category)}</span></div>
+              <div class="row"><span class="k">Department</span><span class="v">${escapeHtml(r.department)}</span></div>
+              <div class="row"><span class="k">Assigned to</span><span class="v">${r.assignedTo ? escapeHtml(userLabel(r.assignedTo)) : "Unassigned"}</span></div>
+              <div class="row"><span class="k">Created</span><span class="v">${fmtDate(r.createdAt)}</span></div>
+              <div class="row"><span class="k">Required by</span><span class="v">${r.requiredDate ? fmtDate(r.requiredDate) : "—"}</span></div>
+              <div class="row"><span class="k">SLA deadline</span><span class="v">${fmtDate(r.slaDeadline)}</span></div>
+              <div class="row"><span class="k">Contact</span><span class="v">${escapeHtml(r.contact || "—")}</span></div>
+              <div class="row"><span class="k">SLA target</span><span class="v">${r.slaRecord ? `${r.slaRecord.targetHours} hours` : "—"}</span></div>
+              <div class="row"><span class="k">SLA state</span><span class="v">${escapeHtml(r.sla)}</span></div>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-bottom:16px">
+            <div class="panel-header"><h2>Assignment history</h2></div>
+            <div class="panel-body">
+              ${
+                r.assignments && r.assignments.length
+                  ? r.assignments.map(a => `<div class="comment"><div class="comment-head"><span class="who">${escapeHtml(a.assignedName)}</span><span>·</span><span>${fmtDate(a.assignedAt)}</span></div><div>Assigned by ${escapeHtml(userLabel(a.assignedBy))}${a.note ? ` · ${escapeHtml(a.note)}` : ""}</div></div>`).join("")
+                  : `<div class="hint">No assignment history yet.</div>`
+              }
+            </div>
+          </div>
+
+          ${
+            canManage
+              ? `<div class="panel" style="margin-bottom:16px">
+                  <div class="panel-header"><h2>Update status</h2></div>
+                  <div class="panel-body">
+                    <div id="statusAlert"></div>
+                    ${
+                      nextStatusOptions.length
+                        ? `<form id="statusForm">
+                            <div class="field">
+                              <select id="statusSelect">${nextStatusOptions.map((s) => `<option>${s}</option>`).join("")}</select>
+                            </div>
+                            <div class="field">
+                              <textarea id="statusNote" placeholder="Resolution note (optional)"></textarea>
+                            </div>
+                            <button class="btn btn-primary btn-sm" type="submit">Apply status</button>
+                          </form>`
+                        : `<div class="hint">No further status change available. Closed requests must be reopened below.</div>`
+                    }
+                  </div>
+                </div>`
+              : ""
+          }
+
+          ${
+            canAssign
+              ? `<div class="panel" style="margin-bottom:16px">
+                  <div class="panel-header"><h2>Assign</h2></div>
+                  <div class="panel-body">
+                    <div id="assignAlert"></div>
+                    <form id="assignForm">
+                      <div class="field">
+                        <select id="assigneeSelect"><option value="">Select executive…</option></select>
+                      </div>
+                      <button class="btn btn-sm" type="submit">Assign request</button>
+                    </form>
+                  </div>
+                </div>`
+              : ""
+          }
+
+          ${
+            ["Resolved", "Closed"].includes(r.status) && (isOwner || canManage)
+              ? `<div class="panel">
+                  <div class="panel-body">
+                    <div id="reopenAlert"></div>
+                    <button class="btn btn-danger btn-sm" id="reopenBtn" style="width:100%">Reopen request</button>
+                  </div>
+                </div>`
+              : ""
+          }
+        </div>
+      </div>
+    `;
+
+    const downloadAttachmentBtn = document.getElementById("downloadAttachmentBtn");
+    if (downloadAttachmentBtn && r.attachments && r.attachments.length) {
+      downloadAttachmentBtn.addEventListener("click", async () => {
+        try {
+          const res = await fetch(`${API_BASE_URL}/attachments/${r.attachments[0].id}`, { headers: { Authorization: `Bearer ${Session.getToken()}` } });
+          if (!res.ok) throw new Error("Could not download attachment.");
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a"); a.href = url; a.download = r.attachments[0].fileName; a.click();
+          URL.revokeObjectURL(url);
+        } catch (err) { alert(err.message); }
+      });
+    }
+
+    document.getElementById("commentForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = document.getElementById("commentText").value.trim();
+      if (!text) return;
+      const internal = document.getElementById("internalCheck") ? document.getElementById("internalCheck").checked : false;
+      try {
+        await Api.addComment(r.id, text, internal);
+        load();
+      } catch (err) { alert(err.message); }
+    });
+
+    if (canManage) {
+      const statusForm = document.getElementById("statusForm");
+      if (statusForm) {
+        statusForm.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          try {
+            await Api.updateStatus(r.id, document.getElementById("statusSelect").value, document.getElementById("statusNote").value.trim());
+            load();
+          } catch (err) {
+            showAlert(document.getElementById("statusAlert"), err.message);
+          }
+        });
+      }
+    }
+
+    if (canAssign) {
+      const users = await ensureUsers();
+      const execs = users.filter((u) => u.role === "executive" && u.department === r.department);
+      document.getElementById("assigneeSelect").innerHTML += execs.map((u) => `<option value="${u.id}" ${u.id === r.assignedTo ? "selected" : ""}>${escapeHtml(u.name)}</option>`).join("");
+      document.getElementById("assignForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const val = document.getElementById("assigneeSelect").value;
+        if (!val) return;
+        try { await Api.assignRequest(r.id, val); load(); }
+        catch (err) { showAlert(document.getElementById("assignAlert"), err.message); }
+      });
+    }
+
+    const reopenBtn = document.getElementById("reopenBtn");
+    if (reopenBtn) {
+      reopenBtn.addEventListener("click", async () => {
+        const reason = prompt("Reason for reopening this request:");
+        if (reason === null) return;
+        try { await Api.reopenRequest(r.id, reason); load(); }
+        catch (err) { showAlert(document.getElementById("reopenAlert"), err.message); }
+      });
+    }
+  }
+
+  function statusOptionsFor(status) {
+    const map = {
+      Open: ["Assigned", "In Progress"],
+      Assigned: ["In Progress", "Pending Information"],
+      "In Progress": ["Pending Information", "Resolved"],
+      "Pending Information": ["In Progress"],
+      Resolved: ["Closed"],
+      Closed: [],
+    };
+    return map[status] || [];
+  }
+
+  function userLabel(id) {
+    const u = usersCache.find((x) => x.id === id);
+    return u ? u.name : id;
+  }
+
+  await ensureUsers();
+  load();
+})();
+</script>
+</body>
+</html>

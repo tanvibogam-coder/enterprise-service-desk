@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Requests · Service Desk</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <h1 id="pageTitle">Requests</h1>
+      <div class="topbar-right">
+        <button class="icon-btn" id="notifBell">🔔<span class="badge-count" id="notifCount" style="display:none"></span></button>
+      </div>
+    </div>
+    <div class="content">
+      <div class="filter-bar">
+        <div class="field">
+          <label>Search</label>
+          <input type="text" id="fq" placeholder="Title, ID, description…">
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select id="fstatus">
+            <option value="">All</option>
+            <option>Open</option><option>Assigned</option><option>In Progress</option>
+            <option>Pending Information</option><option>Resolved</option><option>Closed</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Priority</label>
+          <select id="fpriority">
+            <option value="">All</option>
+            <option>Low</option><option>Medium</option><option>High</option><option>Critical</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Category</label>
+          <select id="fcategory"><option value="">All</option></select>
+        </div>
+        <div class="field" id="deptFilterWrap" style="display:none">
+          <label>Department</label>
+          <select id="fdept"><option value="">All</option></select>
+        </div>
+        <div class="field" id="assignedFilterWrap" style="display:none">
+          <label>Assigned to</label>
+          <select id="fassigned"><option value="">All</option></select>
+        </div>
+        <div class="field">
+          <label>From date</label>
+          <input type="date" id="ffrom">
+        </div>
+        <div class="field">
+          <label>To date</label>
+          <input type="date" id="fto">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="btn" id="resetBtn">Reset filters</button>
+        </div>
+      </div>
+      <div id="alertBox"></div>
+      <div class="panel">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Department</th><th>Priority</th><th>Status</th><th>SLA</th><th>Updated</th></tr></thead>
+            <tbody id="rowsBody"><tr><td colspan="8" class="loading-row">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pagination panel-body" id="pagination"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="services/api.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(async function () {
+  const user = guardPage(["employee", "executive", "manager", "admin"]);
+  if (!user) return;
+  await renderShell("requests-list.html");
+  document.getElementById("pageTitle").textContent =
+    user.role === "employee" ? "My Requests" : user.role === "executive" ? "Assigned Requests" : "All Requests";
+
+  let page = 1;
+  const pageSize = 10;
+
+  try {
+    const categories = await Api.categories();
+    document.getElementById("fcategory").innerHTML += categories.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
+  } catch (e) {}
+
+  if (["manager", "admin"].includes(user.role)) {
+    document.getElementById("deptFilterWrap").style.display = "";
+    try {
+      const depts = await Api.departments();
+      document.getElementById("fdept").innerHTML += depts.map((d) => `<option value="${escapeHtml(d.name)}">${escapeHtml(d.name)}</option>`).join("");
+    } catch (e) {}
+  }
+
+  if (["executive", "manager", "admin"].includes(user.role)) {
+    document.getElementById("assignedFilterWrap").style.display = "";
+    try {
+      const users = await Api.users();
+      const execs = users.filter((u) => u.role === "executive");
+      document.getElementById("fassigned").innerHTML += execs.map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.name)}</option>`).join("");
+    } catch (e) {}
+  }
+
+  async function load() {
+    const alertBox = document.getElementById("alertBox");
+    clearAlert(alertBox);
+    const params = {
+      q: document.getElementById("fq").value.trim(),
+      status: document.getElementById("fstatus").value,
+      priority: document.getElementById("fpriority").value,
+      category: document.getElementById("fcategory").value,
+      department: document.getElementById("fdept") ? document.getElementById("fdept").value : "",
+      assignedTo: document.getElementById("fassigned") ? document.getElementById("fassigned").value : "",
+      from: document.getElementById("ffrom").value ? document.getElementById("ffrom").value + "T00:00:00" : "",
+      to: document.getElementById("fto").value ? document.getElementById("fto").value + "T23:59:59" : "",
+      page, pageSize,
+      sort: "-updatedAt",
+    };
+    try {
+      const { data, total, totalPages } = await Api.listRequests(params);
+      const body = document.getElementById("rowsBody");
+      body.innerHTML = data.length
+        ? data
+            .map(
+              (r) => `<tr onclick="location.href='request-detail.html?id=${r.id}'">
+                <td class="req-id">${r.id}</td>
+                <td>${escapeHtml(r.title)}</td>
+                <td>${escapeHtml(r.category)}</td>
+                <td>${escapeHtml(r.department)}</td>
+                <td>${priorityBadge(r.priority)}</td>
+                <td>${statusBadge(r.status)}</td>
+                <td>${slaBadge(r.sla)}</td>
+                <td>${fmtDate(r.updatedAt)}</td>
+              </tr>`
+            )
+            .join("")
+        : `<tr><td colspan="8"><div class="empty-state"><div class="glyph">🔎</div>No requests match these filters.</div></td></tr>`;
+
+      document.getElementById("pagination").innerHTML = `
+        <span>${total} result${total === 1 ? "" : "s"} · page ${page} of ${totalPages || 1}</span>
+        <span class="btns">
+          <button class="btn btn-sm" id="prevBtn" ${page <= 1 ? "disabled" : ""}>Previous</button>
+          <button class="btn btn-sm" id="nextBtn" ${page >= totalPages ? "disabled" : ""}>Next</button>
+        </span>`;
+      const prev = document.getElementById("prevBtn"), next = document.getElementById("nextBtn");
+      if (prev) prev.addEventListener("click", () => { page--; load(); });
+      if (next) next.addEventListener("click", () => { page++; load(); });
+    } catch (err) {
+      showAlert(alertBox, err.message);
+    }
+  }
+
+  ["fq", "fstatus", "fpriority", "fcategory", "fdept", "fassigned", "ffrom", "fto"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener(id === "fq" ? "input" : "change", debounce(() => { page = 1; load(); }, 250));
+  });
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    document.getElementById("fq").value = "";
+    document.getElementById("fstatus").value = "";
+    document.getElementById("fpriority").value = "";
+    document.getElementById("fcategory").value = "";
+    if (document.getElementById("fdept")) document.getElementById("fdept").value = "";
+    if (document.getElementById("fassigned")) document.getElementById("fassigned").value = "";
+    document.getElementById("ffrom").value = "";
+    document.getElementById("fto").value = "";
+    page = 1; load();
+  });
+
+  function debounce(fn, ms) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

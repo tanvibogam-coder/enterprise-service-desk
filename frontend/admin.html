@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin · Service Desk</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+  .tab-btn { background: none; border: none; padding: 9px 14px; font-size: 13px; font-weight: 600; color: var(--ink-soft); cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab-btn.active { color: var(--brand); border-color: var(--brand); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <h1>Admin</h1>
+      <div class="topbar-right">
+        <button class="icon-btn" id="notifBell">🔔<span class="badge-count" id="notifCount" style="display:none"></span></button>
+      </div>
+    </div>
+    <div class="content">
+      <div id="alertBox"></div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="users">Users</button>
+        <button class="tab-btn" data-tab="departments">Departments</button>
+        <button class="tab-btn" data-tab="categories">Categories</button>
+        <button class="tab-btn" data-tab="audit">Audit trail</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-users">
+        <div class="panel" style="margin-bottom:16px">
+          <div class="panel-header"><h2>Add user</h2></div>
+          <div class="panel-body">
+            <form id="userForm">
+              <div class="form-row">
+                <div class="field"><label>Name</label><input type="text" id="uName" required></div>
+                <div class="field"><label>Email</label><input type="email" id="uEmail" required></div>
+              </div>
+              <div class="form-row">
+                <div class="field"><label>Role</label>
+                  <select id="uRole"><option value="employee">Employee</option><option value="executive">Executive</option><option value="manager">Manager</option><option value="admin">Admin</option></select>
+                </div>
+                <div class="field"><label>Department</label><input type="text" id="uDept" placeholder="e.g. IT Support"></div>
+              </div>
+              <div class="field"><label>Temporary password</label><input type="text" id="uPass" required placeholder="min 8 characters"></div>
+              <button class="btn btn-primary btn-sm" type="submit">Create user</button>
+            </form>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Active</th><th></th></tr></thead>
+              <tbody id="usersBody"><tr><td colspan="7" class="loading-row">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-departments">
+        <div class="panel" style="margin-bottom:16px">
+          <div class="panel-header"><h2>Add department</h2></div>
+          <div class="panel-body">
+            <form id="deptForm">
+              <div class="form-row">
+                <div class="field"><label>Name</label><input type="text" id="dName" required></div>
+                <div class="field"><label>Manager user ID (optional)</label><input type="text" id="dManager" placeholder="e.g. U-1003"></div>
+              </div>
+              <button class="btn btn-primary btn-sm" type="submit">Create department</button>
+            </form>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="table-wrap">
+            <table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Manager</th></tr></thead><tbody id="deptBody"></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-categories">
+        <div class="panel" style="margin-bottom:16px">
+          <div class="panel-header"><h2>Add category</h2></div>
+          <div class="panel-body">
+            <form id="catForm">
+              <div class="form-row">
+                <div class="field"><label>Name</label><input type="text" id="cName" required></div>
+                <div class="field"><label>Department</label><input type="text" id="cDept" required></div>
+              </div>
+              <div class="field"><label>Default priority</label>
+                <select id="cPriority"><option>Low</option><option selected>Medium</option><option>High</option><option>Critical</option></select>
+              </div>
+              <button class="btn btn-primary btn-sm" type="submit">Create category</button>
+            </form>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="table-wrap">
+            <table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Default priority</th></tr></thead><tbody id="catBody"></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-audit">
+        <div class="panel">
+          <div class="table-wrap">
+            <table class="data-table"><thead><tr><th>When</th><th>User</th><th>Action</th><th>Request</th><th>Details</th></tr></thead><tbody id="auditBody"><tr><td colspan="5" class="loading-row">Loading…</td></tr></tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="services/api.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(async function () {
+  const user = guardPage(["admin"]);
+  if (!user) return;
+  await renderShell("admin.html");
+  const alertBox = document.getElementById("alertBox");
+
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    });
+  });
+
+  async function loadUsers() {
+    const users = await Api.adminUsers();
+    document.getElementById("usersBody").innerHTML = users
+      .map(
+        (u) => `<tr>
+          <td class="req-id">${u.id}</td><td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.email)}</td>
+          <td style="text-transform:capitalize">${u.role}</td><td>${escapeHtml(u.department || "—")}</td>
+          <td>${u.active ? "Active" : "Disabled"}</td>
+          <td><button class="btn btn-sm" data-id="${u.id}" data-active="${u.active}">${u.active ? "Disable" : "Enable"}</button></td>
+        </tr>`
+      )
+      .join("");
+    document.querySelectorAll("#usersBody button[data-id]").forEach((b) => {
+      b.addEventListener("click", async () => {
+        try { await Api.adminUpdateUser(b.dataset.id, { active: b.dataset.active !== "true" }); loadUsers(); }
+        catch (err) { showAlert(alertBox, err.message); }
+      });
+    });
+  }
+
+  async function loadDepartments() {
+    const depts = await Api.adminDepartments();
+    document.getElementById("deptBody").innerHTML = depts.map((d) => `<tr><td class="req-id">${d.id}</td><td>${escapeHtml(d.name)}</td><td>${escapeHtml(d.managerId || "—")}</td></tr>`).join("");
+  }
+  async function loadCategories() {
+    const cats = await Api.adminCategories();
+    document.getElementById("catBody").innerHTML = cats.map((c) => `<tr><td class="req-id">${c.id}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.department)}</td><td>${priorityBadge(c.defaultPriority)}</td></tr>`).join("");
+  }
+  async function loadAudit() {
+    const logs = await Api.adminAuditLogs();
+    document.getElementById("auditBody").innerHTML = logs.length
+      ? logs.map((l) => `<tr><td>${fmtDate(l.timestamp)}</td><td class="req-id">${l.userId}</td><td>${escapeHtml(l.action)}</td><td class="req-id">${l.requestId || "—"}</td><td>${escapeHtml(l.details || "")}</td></tr>`).join("")
+      : `<tr><td colspan="5"><div class="empty-state">No activity logged yet.</div></td></tr>`;
+  }
+
+  document.getElementById("userForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); clearAlert(alertBox);
+    try {
+      await Api.adminCreateUser({ name: uName.value.trim(), email: uEmail.value.trim(), role: uRole.value, department: uDept.value.trim() || null, password: uPass.value });
+      e.target.reset(); loadUsers();
+    } catch (err) { showAlert(alertBox, err.message); }
+  });
+  document.getElementById("deptForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); clearAlert(alertBox);
+    try { await Api.adminCreateDepartment({ name: dName.value.trim(), managerId: dManager.value.trim() || null }); e.target.reset(); loadDepartments(); }
+    catch (err) { showAlert(alertBox, err.message); }
+  });
+  document.getElementById("catForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); clearAlert(alertBox);
+    try { await Api.adminCreateCategory({ name: cName.value.trim(), department: cDept.value.trim(), defaultPriority: cPriority.value }); e.target.reset(); loadCategories(); }
+    catch (err) { showAlert(alertBox, err.message); }
+  });
+
+  try { await Promise.all([loadUsers(), loadDepartments(), loadCategories(), loadAudit()]); }
+  catch (err) { showAlert(alertBox, err.message); }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard · Service Desk</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <h1>My Dashboard</h1>
+      <div class="topbar-right">
+        <button class="icon-btn" id="notifBell">🔔<span class="badge-count" id="notifCount" style="display:none"></span></button>
+        <a class="btn btn-primary btn-sm" href="create-request.html">+ New request</a>
+      </div>
+    </div>
+    <div class="content">
+      <div class="kpi-grid" id="kpiGrid"></div>
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Recent requests</h2>
+          <a href="requests-list.html" class="btn btn-sm">View all</a>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>ID</th><th>Title</th><th>Department</th><th>Priority</th><th>Status</th><th>Updated</th></tr></thead>
+            <tbody id="recentBody"><tr><td colspan="6" class="loading-row">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="services/api.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(async function () {
+  const user = guardPage(["employee"]);
+  if (!user) return;
+  await renderShell("employee-dashboard.html");
+
+  try {
+    const { counts, recent } = await Api.employeeDashboard();
+    const order = ["Open", "Assigned", "In Progress", "Pending Information", "Resolved", "Closed"];
+    document.getElementById("kpiGrid").innerHTML = order
+      .map((s) => `<div class="kpi-card"><div class="kpi-label">${s}</div><div class="kpi-value">${counts[s] || 0}</div></div>`)
+      .join("");
+
+    const body = document.getElementById("recentBody");
+    body.innerHTML = recent.length
+      ? recent
+          .map(
+            (r) => `<tr onclick="location.href='request-detail.html?id=${r.id}'">
+              <td class="req-id">${r.id}</td>
+              <td>${escapeHtml(r.title)}</td>
+              <td>${escapeHtml(r.department)}</td>
+              <td>${priorityBadge(r.priority)}</td>
+              <td>${statusBadge(r.status)}</td>
+              <td>${fmtDate(r.updatedAt)}</td>
+            </tr>`
+          )
+          .join("")
+      : `<tr><td colspan="6"><div class="empty-state"><div class="glyph">🗂️</div>No requests yet — raise your first one.</div></td></tr>`;
+  } catch (err) {
+    document.getElementById("recentBody").innerHTML = `<tr><td colspan="6"><div class="alert alert-error">${escapeHtml(err.message)}</div></td></tr>`;
+  }
+})();
+</script>
+</body>
+</html>

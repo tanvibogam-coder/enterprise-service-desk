@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New Request · Service Desk</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <h1>New service request</h1>
+      <div class="topbar-right">
+        <button class="icon-btn" id="notifBell">🔔<span class="badge-count" id="notifCount" style="display:none"></span></button>
+      </div>
+    </div>
+    <div class="content" style="max-width:640px">
+      <div id="alertBox"></div>
+      <div class="panel">
+        <div class="panel-body">
+          <form id="reqForm">
+            <div class="field">
+              <label for="title">Request title</label>
+              <input type="text" id="title" required placeholder="e.g. Laptop access request">
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="category">Category</label>
+                <select id="category" required></select>
+              </div>
+              <div class="field">
+                <label for="priority">Priority</label>
+                <select id="priority" required>
+                  <option value="Low">Low</option>
+                  <option value="Medium" selected>Medium</option>
+                  <option value="High">High</option>
+                  <option value="Critical">Critical</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label>Department</label>
+              <input type="text" id="department" readonly style="background:var(--line-soft)">
+              <div class="hint">Set automatically from the category you choose.</div>
+            </div>
+            <div class="field">
+              <label for="description">Description</label>
+              <textarea id="description" required placeholder="Describe the issue or request in detail…"></textarea>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="requiredDate">Required by</label>
+                <input type="date" id="requiredDate">
+              </div>
+              <div class="field">
+                <label for="contact">Contact number</label>
+                <input type="text" id="contact" placeholder="+91-9000000000">
+              </div>
+            </div>
+            <div class="field">
+              <label for="attachment">Attachment (optional)</label>
+              <input type="file" id="attachment">
+              <div class="hint">Allowed: PDF, Office, images, CSV or TXT · maximum 5 MB.</div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="submitBtn">Submit request</button>
+              <a href="employee-dashboard.html" class="btn">Cancel</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="services/api.js"></script>
+<script src="js/ui.js"></script>
+<script>
+(async function () {
+  const user = guardPage(["employee"]);
+  if (!user) return;
+  await renderShell("create-request.html");
+
+  const alertBox = document.getElementById("alertBox");
+  let categories = [];
+  try {
+    categories = await Api.categories();
+    const sel = document.getElementById("category");
+    sel.innerHTML = categories.map((c) => `<option value="${c.name}" data-dept="${escapeHtml(c.department)}" data-priority="${c.defaultPriority}">${escapeHtml(c.name)}</option>`).join("");
+    syncDept();
+  } catch (err) {
+    showAlert(alertBox, err.message);
+  }
+
+  function syncDept() {
+    const sel = document.getElementById("category");
+    const opt = sel.options[sel.selectedIndex];
+    document.getElementById("department").value = opt ? opt.getAttribute("data-dept") : "";
+    if (opt) document.getElementById("priority").value = opt.getAttribute("data-priority");
+  }
+  document.getElementById("category").addEventListener("change", syncDept);
+
+  document.getElementById("reqForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    clearAlert(alertBox);
+    const btn = document.getElementById("submitBtn");
+    btn.disabled = true; btn.textContent = "Submitting…";
+    const attachmentFile = document.getElementById("attachment").files[0];
+    const payload = {
+      title: document.getElementById("title").value.trim(),
+      category: document.getElementById("category").value,
+      department: document.getElementById("department").value,
+      priority: document.getElementById("priority").value,
+      description: document.getElementById("description").value.trim(),
+      requiredDate: document.getElementById("requiredDate").value || null,
+      contact: document.getElementById("contact").value.trim() || null,
+      attachment: attachmentFile ? attachmentFile.name : null,
+    };
+    try {
+      const { request, duplicateWarning } = await Api.createRequest(payload, attachmentFile);
+      if (duplicateWarning) {
+        const proceed = confirm(`${duplicateWarning.message}\n\nSubmit this as a new request anyway?`);
+        if (!proceed) { location.href = `request-detail.html?id=${duplicateWarning.requestId}`; return; }
+      }
+      location.href = `request-detail.html?id=${request.id}`;
+    } catch (err) {
+      showAlert(alertBox, err.message);
+      btn.disabled = false; btn.textContent = "Submit request";
+    }
+  });
+})();
+</script>
+</body>
+</html>
